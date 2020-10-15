@@ -48,8 +48,11 @@ if (isset($_GET['p'])) {
 		$title = setTitle($p);
 	}
 } elseif (isset($_GET['u']) && !empty($_GET['u'])) {
-	$title = setTitle('u');
-	$p = 'u';
+	/*if (!is_numeric($_GET['u'])) {
+		die('invalid user id');
+	}*/
+	redirect($URL["server"] . "/u/" . $_GET['u']);
+	die();
 } elseif (isset($_GET['__PAGE__'])) {
 	$pages_split = explode('/', $_GET['__PAGE__']);
 	if (count($_GET['__PAGE__']) < 2) {
@@ -85,19 +88,6 @@ if (isset($_GET['p'])) {
 
     <!-- Dynamic title -->
     <?php echo $title; ?>
-
-	<?php
-if ($p == 27) {
-	global $ServerStatusConfig;
-	if ($ServerStatusConfig['netdata']['enable']) {
-		echo '
-						<!-- Netdata script -->
-						<script type="text/javascript">var netdataServer = "'.$ServerStatusConfig['netdata']['server_url'].'";</script>
-						<script type="text/javascript" src="'.$ServerStatusConfig['netdata']['server_url'].'/dashboard.js"></script>
-				';
-	}
-}
-?>
 
     <!-- Bootstrap Core CSS -->
     <link href="./css/bootstrap.min.css" rel="stylesheet">
@@ -226,6 +216,10 @@ if ($p < 100) {
 	<script type="text/javascript">
 		// Escape function
 		function escapeHtml(unsafe) {
+			// utterly disgusting
+			if (typeof unsafe !== 'string' || unsafe instanceof String) {
+				return escapeHtml(String(unsafe));
+			}
 			return unsafe
 				.replace(/&/g, "&amp;")
 				.replace(/</g, "&lt;")
@@ -281,6 +275,10 @@ if ($p < 100) {
 			document.isMobile = window.matchMedia('(max-width: 768px)').matches
 		}
 
+		function updateNukeText(d, t) {
+			d.text(d.data("text") + " (" + (d.data("times")) + ")");
+		}
+
 		$(document).ready(function () {
 			// Initialize stuff
 			$('.icp-auto').iconpicker();
@@ -288,6 +286,27 @@ if ($p < 100) {
 			$('.sceditor').sceditor({plugins: "bbcode", resizeEnabled: false, toolbarExclude: "font,table,code,quote,ltr,rtl" , style: "css/jquery.sceditor.default.css"});
 			$(".spoiler-trigger").click(function() {$(this).parent().next().collapse('toggle');});
 			$("[data-toggle=popover]").popover();
+			$(".nuke-button").each(function() {
+				$(this).data("text", $(this).text());
+				updateNukeText($(this));
+			})
+			$(".nuke-button").click(function() {
+				var t = $(this).data("times");
+				if (t <= 1) {
+					if (reallysuredialog()) {
+						$(this).parent("form").submit();
+					}
+				} else {
+					t = t - 1;
+					$(this).data("times", t);
+					updateNukeText($(this));
+					$(this).addClass("disabled");
+					var o = $(this);
+					setTimeout(() => {
+						$(this).removeClass("disabled");
+					}, 1000);
+				}
+			});
 			$(window).resize(function () {
 				updateResolution()
 			})
@@ -301,6 +320,7 @@ if ($p < 100) {
 				i.text("(" + data + ")");
 			});
 		});
+		$('[data-toggle="tooltip"]').tooltip();
     </script>
 
 
@@ -310,6 +330,7 @@ switch ($p) {
 		// Admin cp - edit user
 
 	case 100: echo '<script src="./js/pipoli.js"></script>'; break;
+	case 141: echo '<script src="./secret/js/ornella.js"></script>'; break;
 
 	case 103:
 		echo '

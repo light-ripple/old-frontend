@@ -97,12 +97,15 @@ $reCaptchaConfig = [
 
 // Discord and Donor Bot config
 $discordConfig = [
-	"invite_url" => "",
+	"donor_bot_secret" => "braceaccesa",
+
 	"client_id" => "",
 	"client_secret" => "",
+	"hanayo_base" => "https://ripple.moe",
 
-	"donor_bot_url" => "http://127.0.0.1:3366",
-	"donor_bot_secret" => "braceaccesa",
+	"guild_id" => 0,
+	"donor_role_id" => 0,
+	"bot_token" => "",
 ];
 
 // Paypal config
@@ -117,3 +120,11 @@ $paypalTgConfig = [
 	"token" => "",
 	"recipient" => 0
 ];
+
+$redisConfig = [
+	"scheme" => "tcp",
+	"host" => "redis",
+	"port" => 6379
+];
+
+$sentryDSN = "";

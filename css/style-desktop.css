@@ -1,7 +1,7 @@
 /* Desktop CSS*/
 @import url(https://fonts.googleapis.com/css?family=Open+Sans:400,700,400italic);
 @import url(https://fonts.googleapis.com/css?family=Source+Sans+Pro:400,700,600,400italic,600italic,700italic,900,900italic);
-@import url(https://maxcdn.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css);
+@import url(https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.10.0-12/css/all.css);
 @import url(https://fonts.googleapis.com/css?family=Raleway:400,700);
 @import url('https://fonts.googleapis.com/css?family=Space+Mono');
 
@@ -173,8 +173,9 @@ hr {
 
 /* Admin Panel Style */
 #wrapper {
-    position: relative;
-    top: -20px;
+    position: absolute;
+    top: 50px;
+    width: 100%;
     padding-left: 0;
     -webkit-transition: all 0.5s ease;
     -moz-transition: all 0.5s ease;
@@ -195,6 +196,7 @@ hr {
     overflow-y: auto;
     background-color: #222222;
     text-align: left;
+    overflow-x: hidden;
 }
 
 #sidebar-wrapper.collapse, #sidebar-wrapper.collapse.in {
@@ -435,11 +437,27 @@ hr {
 }
 
 .circle {
-	float: left;
-	width: 60px;
-	height: 60px;
-	border-radius: 50%;
-	margin-top: 15px;
+	max-width: 25px;
+    max-height: 25px;
+    border-radius: 500rem;
+    margin-right: 1em;
+}
+
+.logline {
+    display: flex;
+    background-color: #FEF9E7;
+    margin: 0.25em;
+    padding: 0.25em
+}
+
+.logline>div:nth-child(2) {
+    max-width: 50%;
+}
+
+.logline>div:last-child {
+    flex-grow: 1;
+    text-align: right;
+    font-size: 90%;
 }
 
 
@@ -1132,4 +1150,26 @@ tr.bold>* {
     #ranktable td {
         margin: 0 !important;
     }
+
+    .sidebar-nav li {
+        text-indent: 20px;
+        line-height: 1.5em;
+    }
+}
+
+.bad {
+    background-color: darkred;
+    color: white;
+}
+
+.underline {
+    text-decoration: underline;
+}
+
+.line-through {
+    text-decoration: line-through;
+}
+
+.getcountry {
+    cursor: pointer;
 }

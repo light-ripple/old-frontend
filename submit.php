@@ -217,6 +217,34 @@ try {
 			sessionCheckAdmin(Privileges::AdminBanUsers);
 			D::BulkBan();
 		break;
+		case 'remove2FA':
+			sessionCheckAdmin(Privileges::AdminManageUsers);
+			D::Remove2FA();
+		break;
+		case 'deleteUser':
+			sessionCheckAdmin(Privileges::AdminManageServers);
+			D::DeleteUser();
+		break;
+		case 'reloadChatChannels':
+			sessionCheckAdmin(Privileges::AdminManageServers);
+			D::ReloadChatChannels();
+		break;
+		case 'saveA':
+			sessionCheckAdmin(Privileges::AdminCaker);
+			Fringuellina::EditA();
+		break;
+		case 'toggleA':
+			sessionCheckAdmin(Privileges::AdminCaker);
+			Fringuellina::ToggleA();
+		break;
+		case 'removeA':
+			sessionCheckAdmin(Privileges::AdminCaker);
+			Fringuellina::RemoveA();
+		break;
+		case 'setFP':
+			sessionCheckAdmin(Privileges::AdminCaker);
+			D::SetFalsePositive();
+		break;
 		default:
 			throw new Exception('Invalid action value');
 	}

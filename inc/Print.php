@@ -7,18 +7,27 @@ class P {
 	*/
 	public static function AdminDashboard() {
 		// Get admin dashboard data
-		$submittedScoresFull = current($GLOBALS['db']->fetch('SELECT COUNT(*) FROM scores LIMIT 1'));
+		redisConnect();
+		$submittedScoresFull = $GLOBALS["redis"]->get("ripple:total_submitted_scores"); //current($GLOBALS['db']->fetch('SELECT COUNT(id) FROM scores LIMIT 1'));
+		if (!$submittedScoresFull) {
+			$submittedScoresFull = 0;
+		}
 		$submittedScores = number_format($submittedScoresFull / 1000000, 2) . "m";
-		$totalScoresFull = current($GLOBALS['db']->fetch('SELECT SUM(playcount_std) + SUM(playcount_taiko) + SUM(playcount_ctb) + SUM(playcount_mania) FROM users_stats WHERE 1'));
+		$totalScoresFull = $GLOBALS["redis"]->get("ripple:total_plays"); // current($GLOBALS['db']->fetch('SELECT SUM(playcount_std) + SUM(playcount_taiko) + SUM(playcount_ctb) + SUM(playcount_mania) FROM users_stats WHERE 1'));
+		if (!$totalScoresFull) {
+			$totalScoresFull = 0;
+		}
 		$totalScores = number_format($totalScoresFull  / 1000000, 2) . "m";
 		// $betaKeysLeft = "∞";
-		/*$totalPPQuery = $GLOBALS['db']->fetch("SELECT SUM(pp) FROM scores WHERE completed = 3 LIMIT 1");
-		$totalPP = 0;
+		$totalPP = $GLOBALS["redis"]->get("ripple:total_pp"); // $GLOBALS['db']->fetch("SELECT SUM(pp_std) + SUM(pp_taiko) + SUM(pp_ctb) + SUM(pp_mania) AS s FROM users_stats WHERE 1 LIMIT 1")["s"];
+		if (!$totalPP) {
+			$totalPP = 0;
+		}
+		/*$totalPP = 0;
 		foreach ($totalPPQuery as $pp) {
 			$totalPP += $pp;
-		}
-		$totalPP = number_format($totalPP);*/
-		$totalPP = "🍆";
+		}*/
+		// $totalPP = "🍆";
 		$recentPlays = $GLOBALS['db']->fetchAll('
 		SELECT
 			beatmaps.song_name, scores.beatmap_md5, users.username,
@@ -39,13 +48,14 @@ class P {
 		LEFT JOIN users ON users.id = scores.userid
 		WHERE users.privileges & 1 > 0
 		ORDER BY scores.pp DESC LIMIT 30');*/
-		redisConnect();
 		$onlineUsers = $GLOBALS["redis"]->get("ripple:online_users");
 		if ($onlineUsers == false) {
 			$onlineUsers = 0;
 		} else {
 			$onlineUsers = $onlineUsers;
 		}
+		$reports = $GLOBALS['db']->fetch("SELECT COUNT(*) AS `count` FROM reports WHERE assigned = 0");
+		$rankRequests = $GLOBALS['db']->fetch("SELECT COUNT(*) AS `count` FROM rank_requests WHERE `time` >= UNIX_TIMESTAMP() - 86400 AND blacklisted = 0");
 		// Print admin dashboard
 		echo '<div id="wrapper">';
 		printAdminSidebar();
@@ -57,9 +67,13 @@ class P {
 		// Stats panels
 		echo '<div class="row">';
 		printAdminPanel('primary', 'fa fa-gamepad fa-5x', $submittedScores, 'Submitted scores', number_format($submittedScoresFull));
-		printAdminPanel('red', 'fa fa-wheelchair-alt fa-5x', $totalScores, 'Total plays', number_format($totalScoresFull));
+		printAdminPanel('yellow', 'fa fa-skull fa-5x', $totalScores, 'Total plays', number_format($totalScoresFull));
 		printAdminPanel('green', 'fa fa-street-view fa-5x', $onlineUsers, 'Online users');
-		printAdminPanel('yellow', 'fa fa-dot-circle-o fa-5x', $totalPP, 'Total PP');
+		printAdminPanel('green', 'fa fa-dot-circle fa-5x', number_format($totalPP), 'Sum of weighted PP');
+		echo '</div><div style="display: flex; justify-content: center;">';
+		printAdminPanel('red', 'fa fa-flag fa-5x', number_format($reports['count']), 'Unassigned reports');
+		printAdminPanel('yellow', 'fa fa-music fa-5x', number_format($rankRequests['count']), 'Rank requests');
+
 		echo '</div>';
 		// Pipoli integration
 		echo '<div id="pipoli" class="row" style="margin-bottom: 0;"></div>';
@@ -127,22 +141,25 @@ class P {
 		echo '<div class="row">';
 		printAdminPanel('primary', 'fa fa-user fa-5x', $totalUsers, 'Total users');
 		printAdminPanel('red', 'fa fa-thumbs-down fa-5x', $bannedUsers, 'Banned users');
-		printAdminPanel('yellow', 'fa fa-money fa-5x', $supporters, 'Donors');
+		printAdminPanel('yellow', 'fa fa-money-bill fa-5x', $supporters, 'Donors');
 		printAdminPanel('green', 'fa fa-star fa-5x', $modUsers, 'Admins');
 		echo '</div>';
 		// Quick edit/silence/kick user button
-		echo '<br><p align="center" class="mobile-flex"><button type="button" class="btn btn-primary" data-toggle="modal" data-target="#quickEditUserModal">Quick edit user (username)</button>';
-		echo '<button type="button" class="btn btn-info" data-toggle="modal" data-target="#quickEditEmailModal">Quick edit user (email)</button>';
-		echo '<a href="index.php?p=135" type="button" class="btn btn-warning">Search user by IP</a>';
-		echo '<button type="button" class="btn btn-warning" data-toggle="modal" data-target="#silenceUserModal">Silence user</button>';
+		if (hasPrivilege(Privileges::AdminManageUsers)) {
+			echo '<br><p align="center" class="mobile-flex"><button type="button" class="btn btn-primary" data-toggle="modal" data-target="#quickEditUserModal">Quick edit user (username)</button>';
+			echo '<button type="button" class="btn btn-info" data-toggle="modal" data-target="#quickEditEmailModal">Quick edit user (email)</button>';
+			echo '<a href="index.php?p=135" type="button" class="btn btn-warning">Search user by IP</a>';
+		}
+		echo '<button type="button" class="btn btn-warning" data-toggle="modal" data-target="#silenceUserModal">Silence user</button>	';
 		echo '<button type="button" class="btn btn-danger" data-toggle="modal" data-target="#kickUserModal">Kick user from Bancho</button>';
 		echo '</p>';
 		// Users plays table
 		echo '<table class="table table-striped table-hover table-50-center">
 		<thead>
-		<tr><th class="text-center"><i class="fa fa-user"></i>	ID</th><th class="text-center">Username</th><th class="text-center">Privileges Group</th><th class="text-center">Allowed</th><th class="text-center">Actions</th></tr>
-		</thead>
-		<tbody>';
+		<tr><th class="text-center"><i class="fa fa-user"></i>	ID</th><th class="text-center">Username</th><th class="text-center">Privileges Group</th><th class="text-center">Allowed</th>';
+
+		if (hasPrivilege(Privileges::AdminManageUsers)) echo '<th class="text-center">Actions</th>';
+		echo '</tr></thead><tbody>';
 		foreach ($users as $user) {
 
 			// Get group color/text
@@ -179,8 +196,10 @@ class P {
 			echo '<td><p class="text-center"><span class="label label-'.$groupColor.'">'.$groupText.'</span></p></td>';
 			echo '<td><p class="text-center"><span class="label label-'.$allowedColor.'">'.$allowedText.'</span></p></td>';
 			echo '<td><p class="text-center">
-			<div class="btn-group-justified">
-			<a title="Edit user" class="btn btn-xs btn-primary" href="index.php?p=103&id='.$user['id'].'"><span class="glyphicon glyphicon-pencil"></span></a>';
+			<div class="btn-group-justified">';
+
+			if (hasPrivilege(Privileges::AdminManageUsers))
+				echo '<a title="Edit user" class="btn btn-xs btn-primary" href="index.php?p=103&id='.$user['id'].'"><span class="glyphicon glyphicon-pencil"></span></a>';
 			if (hasPrivilege(Privileges::AdminBanUsers)) {
 				if (isBanned($user["id"])) {
 					echo '<a title="Unban user" class="btn btn-xs btn-success" onclick="sure(\'submit.php?action=banUnbanUser&id='.$user['id'].'&csrf=' . csrfToken() . '\')"><span class="glyphicon glyphicon-thumbs-up"></span></a>';
@@ -193,7 +212,8 @@ class P {
 					echo '<a title="Restrict user" class="btn btn-xs btn-warning" onclick="sure(\'submit.php?action=restrictUnrestrictUser&id='.$user['id'].'&csrf='.csrfToken().'\')"><span class="glyphicon glyphicon-remove-circle"></span></a>';
 				}
 			}
-			echo '	<a title="Change user identity" class="btn btn-xs btn-danger" href="index.php?p=104&id='.$user['id'].'"><span class="glyphicon glyphicon-refresh"></span></a>
+			if (hasPrivilege(Privileges::AdminManageUsers))
+				echo '	<a title="Change user identity" class="btn btn-xs btn-danger" href="index.php?p=104&id='.$user['id'].'"><span class="glyphicon glyphicon-refresh"></span></a>
 			</div>
 			</p></td>';
 			echo '</tr>';
@@ -357,6 +377,7 @@ class P {
 			$userData = $GLOBALS['db']->fetch('SELECT * FROM users WHERE id = ? LIMIT 1', $_GET['id']);
 			$userStatsData = $GLOBALS['db']->fetch('SELECT * FROM users_stats WHERE id = ? LIMIT 1', $_GET['id']);
 			$ips = $GLOBALS['db']->fetchAll('SELECT ip FROM ip_user WHERE userid = ?', $_GET['id']);
+			$discordData = getDiscordData($userData["id"]);
 			// Check if this user exists
 			if (!$userData || !$userStatsData) {
 				throw new Exception("That user doesn't exist");
@@ -489,6 +510,10 @@ class P {
 				</tr>';
 			}
 			echo '<tr>
+			<td>2FA</td>
+			<td>' . (has2FA($userData["id"]) ? "Yes" : "No") . '</td>
+			</tr>';
+			echo '<tr>
 			<td>Username color<br><i class="no-mobile">(HTML or HEX color)</i></td>
 			<td><p class="text-center"><input type="text" name="c" class="form-control" value="'.$userStatsData['user_color'].'" '.$readonly[1].'></td>
 			</tr>';
@@ -499,6 +524,14 @@ class P {
 			echo '<tr>
 			<td>A.K.A</td>
 			<td><p class="text-center"><input type="text" name="aka" class="form-control" value="'.htmlspecialchars($userStatsData['username_aka']).'"></td>
+			</tr>';
+			echo '<tr>
+			<td>Discord User ID</td>
+			<td>' . (isset($discordData["discordid"]) ? $discordData["discordid"] : "Not linked") . '</td>
+			</tr>';
+			echo '<tr>
+			<td>Discord Custom Role ID</td>
+			<td>' . (isset($discordData["roleid"]) ? $discordData["roleid"] : "No custom role") . '</td>
 			</tr>';
 			echo '<tr>
 			<td>Userpage<br><a onclick="censorUserpage();">(reset userpage)</a></td>
@@ -561,7 +594,7 @@ class P {
 				<td>Custom badge</td>
 				<td>
 					<p align="center">
-						<i class="fa '.htmlspecialchars($userStatsData["custom_badge_icon"]).' fa-2x"></i>
+						'.htmlspecialchars($userStatsData["custom_badge_icon"]).'</i>
 						<br>
 						<b>'.htmlspecialchars($userStatsData["custom_badge_name"]).'</b>
 					</p>
@@ -586,7 +619,7 @@ class P {
 			</tr>';
 			echo '<tr><td>IPs<br><i><a href="index.php?p=136&uid=' . $_GET["id"] . '">(search users with these IPs)</a></i></td><td><ul>';
 			foreach ($ips as $ip) {
-				echo "<li>$ip[ip] <a class='getcountry' data-ip='$ip[ip]' title='Click to retrieve IP country'>(?)</a></li>";
+				echo "<li>$ip[ip] <a class='getcountry' data-ip='$ip[ip]' title='Click to retrieve IP country'><i class='fa fa-globe-americas'></i></a></li>";
 			}
 			echo '</ul></td></tr>';
 			echo '</tbody></form>';
@@ -613,6 +646,10 @@ class P {
 								echo '	<a href="index.php?u='.$_GET['id'].'" class="btn btn-primary">View profile</a>';
 								if (hasPrivilege(Privileges::AdminManageUsers)) {
 									echo '	<a href="index.php?p=132&uid=' . $_GET['id'] . '" class="btn btn-danger">View anticheat reports</a>';
+									if (has2FA($_GET["id"])) {
+										echo '	<a onclick="sure(\'submit.php?action=remove2FA&id='.$_GET['id'].'&csrf=' . csrfToken() . '\')" class="btn btn-danger">Remove 2FA</a>';
+									}
+									Fringuellina::Print142Button();
 								}
 							echo '</li>
 						</ul>';
@@ -635,6 +672,14 @@ class P {
 							echo '<a href="index.php?p=128&uid=' . $_GET["id"] . '" class="btn btn-danger">Find ' . Fringuellina::$cakeRecipeName . '</a>';
 						}
 						echo '		<a onclick="sure(\'submit.php?action=toggleCustomBadge&id='.$_GET['id'].'&csrf='.csrfToken().'\');" class="btn btn-danger">'.(($userStatsData["can_custom_badge"] == 1) ? "Revoke" : "Grant").' custom badge</a>';
+						if (hasPrivilege(Privileges::AdminManageServers)) {
+							echo '<form action="submit.php" method="POST" style="display: inline-block;">
+							<input name="csrf" type="hidden" value="'.csrfToken().'">
+							<input name="action" value="deleteUser" hidden>
+							<input name="id" value="' . $_GET['id'] . '" hidden>';
+							echo '<a class="btn btn-danger nuke-button" data-times="3">Delete account</a>';
+							echo '</form>';
+						}
 						echo '<br>
 							</li>
 						</ul>
@@ -776,7 +821,7 @@ class P {
 		</select>
 		</td>
 		</tr>';
-		echo '<tr>
+		/*echo '<tr>
 		<td>Maintenance mode (in-game)</td>
 		<td>
 		<select name="gm" class="selectpicker" data-width="100%">
@@ -784,7 +829,7 @@ class P {
 		<option value="0" '.$selected[1][2].'>Off</option>
 		</select>
 		</td>
-		</tr>';
+		</tr>';*/
 		echo '<tr>
 		<td>Registration</td>
 		<td>
@@ -826,7 +871,7 @@ class P {
 	*/
 	public static function AdminBadges() {
 		// Get data
-		$badgesData = $GLOBALS['db']->fetchAll('SELECT * FROM badges');
+		$badgesData = $GLOBALS['db']->fetchAll('SELECT badges.id, `name`, icon, COUNT(user_badges.badge) AS c FROM badges LEFT JOIN user_badges ON badges.id = user_badges.badge GROUP BY badges.id');
 		// Print docs stuff
 		echo '<div id="wrapper">';
 		printAdminSidebar();
@@ -844,18 +889,20 @@ class P {
 		echo '<p align="center"><font size=5><i class="fa fa-certificate"></i>	Badges</font></p>';
 		echo '<table class="table table-striped table-hover table-50-center">';
 		echo '<thead>
-		<tr><th class="text-center"><i class="fa fa-certificate"></i>	ID</th><th class="text-center">Name</th><th class="text-center">Icon</th><th class="text-center">Actions</th></tr>
+		<tr><th class="text-center"><i class="fa fa-certificate"></i>	ID</th><th class="text-center">Name</th><th class="text-center">Icon</th><th class="text-center"># used by</th><th class="text-center">Actions</th></tr>
 		</thead>';
 		echo '<tbody>';
 		foreach ($badgesData as $badge) {
 			// Print row for this badge
 			echo '<tr>
 			<td><p class="text-center">'.$badge['id'].'</p></td>
-			<td><p class="text-center">'.$badge['name'].'</p></td>
-			<td><p class="text-center"><i class="fa '.$badge['icon'].' fa-2x"></i></p></td>
+			<td><p class="text-center">'.htmlspecialchars($badge['name']).'</p></td>
+			<td><p class="text-center">'.htmlspecialchars($badge['icon']).'</p></td>
+			<td><p class="text-center">'.$badge['c'].'</p></td>
 			<td><p class="text-center">
 			<div class="btn-group-justified">
 			<a title="Edit badge" class="btn btn-xs btn-primary" href="index.php?p=109&id='.$badge['id'].'"><span class="glyphicon glyphicon-pencil"></span></a>
+			<a title="Find users" class="btn btn-xs btn-success" href="index.php?p=140&id='.$badge['id'].'"><span class="glyphicon glyphicon-zoom-in"></span></a>
 			<a title="Delete badge" class="btn btn-xs btn-danger" onclick="sure(\'submit.php?action=removeBadge&id='.$badge['id'].'&csrf='.csrfToken().'\');"><span class="glyphicon glyphicon-trash"></span></a>
 			</div>
 			</p></td>
@@ -937,8 +984,8 @@ class P {
 			<td><p class="text-center"><input type="text" name="n" class="form-control" value="'.$badgeData['name'].'" ></td>
 			</tr>';
 			echo '<tr>
-			<td>Icon</td>
-			<td><p class="text-center"><input type="text" name="i" class="form-control icp icp-auto" value="'.$badgeData['icon'].'" ></td>
+			<td>Icon<br><i>Copy and paste from <a href="https://emojipedia.org/twitter/" target="_blank">here</a></i></td>
+			<td><p class="text-center"><input type="text" name="i" class="form-control" value="'.$badgeData['icon'].'" ></td>
 			</tr>';
 			echo '</tbody></form>';
 			echo '</table>';
@@ -1128,11 +1175,11 @@ class P {
 		<td>Login notification</td>
 		<td><textarea type="text" name="ln" class="form-control" maxlength="512" style="overflow:auto;resize:vertical;height:100px">'.$ln.'</textarea></td>
 		</tr>';
-		echo '<tr class="success">
-		<td colspan=2><p align="center"><b>Settings are automatically reloaded on Bancho when you press "Save settings".</b> There\'s no need to do <i>!system reload</i> manually anymore.</p></td>
-		</tr>';
 		echo '</tbody><table>
-		<div class="text-center"><button type="submit" class="btn btn-primary">Save settings</button></div></form>';
+		<div class="text-center">
+		<a onclick="sure(\'submit.php?action=reloadChatChannels&csrf=' . csrfToken() . '\')" type="submit" class="btn btn-warning">Reload chat channels</a>
+		<button type="submit" class="btn btn-primary">Save settings</button>
+		</div></form>';
 		echo '</div>';
 	}
 
@@ -1141,20 +1188,22 @@ class P {
 	 * Prints the admin log page
 	*/
 	public static function AdminLog() {
-		// TODO: Ask stampa piede COME SI DICHIARANO LE COSTANTY IN PIACCAPPI??
-		$pageInterval = 50;
-
-		// Get data
-		$first = false;
-		if (isset($_GET["from"])) {
-			$from = $_GET["from"];
-			$first = current($GLOBALS["db"]->fetch("SELECT id FROM rap_logs ORDER BY datetime DESC LIMIT 1")) == $from;
+		if (isset($_GET["page"]) && is_numeric($_GET["page"]) && (int)$_GET["page"] > 0) {
+			$page = (int)$_GET["page"];
 		} else {
-			$from = current($GLOBALS["db"]->fetch("SELECT id FROM rap_logs ORDER BY datetime DESC LIMIT 1"));
-			$first = true;
+			$page = 0;
 		}
-		$to = $from-$pageInterval;
-		$logs = $GLOBALS['db']->fetchAll('SELECT rap_logs.*, users.username FROM rap_logs LEFT JOIN users ON rap_logs.userid = users.id WHERE rap_logs.id <= ? AND rap_logs.id > ? ORDER BY rap_logs.datetime DESC', [$from, $to]);
+		$first = $page == 0;
+		$foka = isset($_GET["foka"]) ? $_GET["foka"] : 1;
+		$fokaFilter = $foka != 0 ? '' : 'WHERE rap_logs.userid != 999';
+		$logs = $GLOBALS['db']->fetchAll('SELECT rap_logs.*, users.username
+			FROM rap_logs
+			LEFT JOIN users ON rap_logs.userid = users.id
+			'.$fokaFilter.'
+			ORDER BY rap_logs.datetime
+			DESC
+			LIMIT 50 OFFSET ' . (50 * $page)
+		);
 		// Print sidebar and template stuff
 		echo '<div id="wrapper">';
 		printAdminSidebar();
@@ -1171,6 +1220,14 @@ class P {
 		}
 		// Header
 		echo '<span class="centered"><h2><i class="fa fa-calendar"></i>	Admin Log</h2></span>';
+		if ($first) {
+			echo '<p align="center" class="mobile-flex">
+				<a href="index.php?p=116&page='.$page.'&foka='.(($foka+1)%2).'" type="button" class="btn btn-info">
+					'.($foka == 1 ? 'Hide' : 'Show').' FokaBot
+				</a>
+			</p>';
+		}
+
 		// Main page content here
 		echo '<div class="bubbles-container">';
 		if (!$logs) {
@@ -1188,11 +1245,11 @@ class P {
 		echo '</div>';
 		echo '<br><br><p align="center">';
 		if (!$first)
-			echo '<a href="index.php?p=116&from=' .($from+$pageInterval) . '">< Prev page</a>';
+			echo '<a href="index.php?p=116&page='.($page-1).'&foka='.$foka.'">< Prev page</a>';
 		if (!$first && $logs)
 			echo ' | ';
 		if ($logs)
-			echo '<a href="index.php?p=116&from=' . $to . '">Next page</a> ></p>';
+			echo '<a href="index.php?p=116&page='.($page+1).'&foka='.$foka.'">Next page</a> ></p>';
 		// Template end
 		echo '</div>';
 	}
@@ -1212,24 +1269,9 @@ class P {
 		if (!empty($_GET['e']) && isset($error[$_GET['e']])) {
 			self::ExceptionMessage($error[$_GET['e']]);
 		}
-		$color = "pink";
-		if (mt_rand(0,9) == 0) {
-			switch(mt_rand(0,3)) {
-				case 0: $color = "red"; break;
-				case 1: $color = "blue"; break;
-				case 2: $color = "green"; break;
-				case 3: $color = "orange"; break;
-			}
-		}
 		echo '<p align="center">
-		<object data="images/logos/logo-'.$color.'.svg" type="image/svg+xml" class="animated bounceIn ripple-logo"></object>
+		<object data="images/logos/new.svg" type="image/svg+xml" class="animated bounceIn ripple-logo"></object>
 		</p>';
-		global $isBday;
-		if ($isBday) {
-			echo '<h1>Happy birthday Ripple!</h1>';
-		} else {
-			echo '<h1>Welcome to Ripple</h1>';
-		}
 		// Home alert
 		self::HomeAlert();
 	}
@@ -2370,12 +2412,12 @@ WHERE users.$kind = ? LIMIT 1", [$u]);
 			self::ExceptionMessageStaccah($_GET['e']);
 		}
 		// Header
-		echo '<span class="centered"><h2><i class="fa fa-group"></i>	Privilege Groups</h2></span>';
+		echo '<span class="centered"><h2><i class="fa fa-layer-group"></i>	Privilege Groups</h2></span>';
 		// Main page content here
 		echo '<div align="center">';
 		echo '<table class="table table-striped table-hover table-75-center">
 		<thead>
-		<tr><th class="text-center"><i class="fa fa-group"></i>	ID</th><th class="text-center">Name</th><th class="text-center">Privileges</th><th class="text-center">Action</th></tr>
+		<tr><th class="text-center"><i class="fa fa-layer-group"></i>	ID</th><th class="text-center">Name</th><th class="text-center">Privileges</th><th class="text-center">Action</th></tr>
 		</thead>
 		<tbody>';
 		foreach ($groups as $group) {
@@ -2429,7 +2471,7 @@ WHERE users.$kind = ? LIMIT 1", [$u]);
 			echo '<div id="page-content-wrapper">';
 			// Maintenance check
 			self::MaintenanceStuff();
-			echo '<p align="center"><font size=5><i class="fa fa-group"></i>	Privilege Group</font></p>';
+			echo '<p align="center"><font size=5><i class="fa fa-layer-group"></i>	Privilege Group</font></p>';
 			echo '<table class="table table-striped table-hover table-50-center">';
 			echo '<tbody><form id="edit-badge-form" action="submit.php" method="POST">
 			<input name="csrf" type="hidden" value="'.csrfToken().'">
@@ -2522,7 +2564,7 @@ WHERE users.$kind = ? LIMIT 1", [$u]);
 			echo '<div align="center">';
 			echo '<table class="table table-striped table-hover table-75-center">
 			<thead>
-			<tr><th class="text-left"><i class="fa fa-group"></i>	ID</th><th class="text-center">Username</th></tr>
+			<tr><th class="text-left"><i class="fa fa-layer-group"></i>	ID</th><th class="text-center">Username</th></tr>
 			</thead>
 			<tbody>';
 			foreach ($users as $user) {
@@ -2714,10 +2756,20 @@ WHERE users.$kind = ? LIMIT 1", [$u]);
 			<td>
 			<select name="gm" class="selectpicker" data-width="100%">
 				<option value="-1">All</option>
-				<option value="0">Standard</option>
-				<option value="1">Taiko</option>
-				<option value="2">Catch the beat</option>
-				<option value="3">Mania</option>
+				<option value="0">osu!standard</option>
+				<option value="1">osu!taiko</option>
+				<option value="2">osu!catch</option>
+				<option value="3">osu!mania</option>
+			</select>
+			</td>
+			</tr>';
+			echo '<tr>
+			<td>Classic/Relax</td>
+			<td>
+			<select name="relax" class="selectpicker" data-width="100%">
+				<option value="-1">Both</option>
+				<option value="0">Classic</option>
+				<option value="1">Relax</option>
 			</select>
 			</td>
 			</tr>';
@@ -2755,7 +2807,7 @@ WHERE users.$kind = ? LIMIT 1", [$u]);
 			echo '<br><br>';
 
 			echo '<div id="main-content">
-				<i class="fa fa-circle-o-notch fa-spin fa-3x fa-fw"></i>
+				<i class="fa fa-circle-notch fa-spin fa-3x fa-fw"></i>
 				<h3>Loading beatmap data from osu!api...</h3>
 				<h5>This might take a while</h5>
 			</div>';
@@ -2782,7 +2834,7 @@ WHERE users.$kind = ? LIMIT 1", [$u]);
 		if (isset($_GET['e']) && !empty($_GET['e'])) {
 			self::ExceptionMessageStaccah($_GET['e']);
 		}
-		echo '<p align="center"><h2><i class="fa fa-level-up"></i>	Rank beatmap manually</h2></p>';
+		echo '<p align="center"><h2><i class="fa fa-level-up-alt"></i>	Rank beatmap manually</h2></p>';
 
 		echo '<br>';
 
@@ -2821,7 +2873,29 @@ WHERE users.$kind = ? LIMIT 1", [$u]);
 
 		echo '<br>';
 
-		$reports = $GLOBALS["db"]->fetchAll("SELECT * FROM reports ORDER BY id DESC LIMIT 50;");
+		if (isset($_GET["r"])) {
+			$q = "SELECT * FROM reports WHERE to_uid = ?";
+			if (isset($_GET["month"])) {
+				echo '(last 30 days only)';
+				$q .= " AND `time` >= UNIX_TIMESTAMP() - 86400 * 30";
+			}
+			$q .= " ORDER BY id DESC LIMIT 50";
+			$reports = $GLOBALS["db"]->fetchAll($q, [$_GET["r"]]);
+		} else if (isset($_GET["uu"])) {
+			echo '(useless report sent by #' . htmlspecialchars($_GET['uu']);
+			$q = "SELECT * FROM reports WHERE from_uid = ? AND assignee = -2";
+			if (isset($_GET["month"])) {
+				echo ', last 30 days only';
+				$q .= " AND `time` >= UNIX_TIMESTAMP() - 86400 * 30";
+			}
+			echo ')';
+			$q .= " ORDER BY id DESC LIMIT 50";
+			$reports = $GLOBALS["db"]->fetchAll($q, [$_GET["uu"]]);
+		} else {
+			$reports = $GLOBALS["db"]->fetchAll("SELECT * FROM reports ORDER BY id DESC LIMIT 50;");
+		}
+
+		
 		echo '<table class="table table-striped table-hover table-75-center">
 		<thead>
 		<tr><th class="text-center"><i class="fa fa-flag"></i>	ID</th><th class="text-center">From</th><th class="text-center">Target</th><th class="text-l">Reason</th><th class="text-center">When</th><th class="text-center">Assignee</th><th class="text-center">Actions</th></tr>
@@ -2914,6 +2988,35 @@ WHERE users.$kind = ? LIMIT 1", [$u]);
 
 			echo '<br>';
 
+			$chatlogHtml = '';
+			$reportedUsername = getUserUsername($report["to_uid"]);
+			$reportedUsernameLower = strtolower($reportedUsername);
+			$chatlog = explode("\n", $report["chatlog"]);
+			foreach ($chatlog as $line) {
+				$matches = [];
+				$class = "";
+				preg_match("/\d\d:\d\d:\d\d - (.+)@.+: .+/", $line, $matches);
+				if (count($matches) == 2 && strtolower($matches[1]) == $reportedUsernameLower) {
+					$class = "bad";
+				}
+				$chatlogHtml .= "<div class='$class'>".htmlspecialchars($line)."</div>";
+			}
+
+			if (hasPrivilege(Privileges::UserPublic, $report["to_uid"])) {
+				$statusIcon = "fa-check-circle";
+				$statusText = "Privileges ok";
+			} else {
+				$statusIcon = "fa-ban";
+				$statusText = "Banned/restricted";
+			}
+			if (isSilenced($report["to_uid"])) {
+				$silencedIcon = "fa-microphone-slash";
+				$silencedText = "Currently silenced";
+			} else {
+				$silencedIcon = "fa-microphone";
+				$silencedText = "Currently not silenced";
+			}
+
 			echo '
 			<div class="narrow-content">
 				<table class="table table-striped table-hover table-100-center"><tbody>
@@ -2923,7 +3026,12 @@ WHERE users.$kind = ? LIMIT 1", [$u]);
 					</tr>
 					<tr>
 						<td><b>Reported user</b></td>
-						<td><a href="index.php?u=' . $report["to_uid"] . '" target="_blank" class="badguy">' . getUserUsername($report["to_uid"]) . '</a></td>
+						<td><a href="index.php?u=' . $report["to_uid"] . '" target="_blank" class="badguy">' . $reportedUsername . '</a>
+						&nbsp;
+						<i data-toggle="popover" data-placement="bottom" data-content="'.$statusText.'" data-trigger="hover" class="fa '.$statusIcon.'"></i>
+						<i data-toggle="popover" data-placement="bottom" data-content="'.$silencedText.'" data-trigger="hover" class="fa '.$silencedIcon.'"></i>
+						<a href="index.php?p=103&id=' . $report["to_uid"] . '"><i title="View in RAP" class="fa fa-eye"></i></a>
+						</td>
 					</tr>
 					<tr>
 						<td><b>Reason</b></td>
@@ -2934,18 +3042,22 @@ WHERE users.$kind = ? LIMIT 1", [$u]);
 						<td>' . timeDifference(time(), $report["time"]) . '</td>
 					</tr>
 					<tr>
-						<td><b>Chatlog*</b></td>
-						<td class="code">' . $report["chatlog"] .  '</td>
+						<td><b>Chatlog</b></td>
+						<td class="code">' . $chatlogHtml .  '</td>
 					</tr>
 					<tr class="' . $statusRowClass . '">
 						<td><b>Status</b></td>
 						<td>' . $status . '</td>
 					</tr>
-					<tr class="info">
-						<td colspan=2><b>' . getUserUsername($report["to_uid"]) . '</b> has been reported <b>' . $reportedCount . '</b> times in the last month</td>
+					<tr>
+						<td colspan=2>
+							<a title="View reports" href="index.php?p=126&r='.$report["to_uid"].'&month=1"><b>' . getUserUsername($report["to_uid"]) . '</b> has been reported <b>' . $reportedCount . '</b> times in the last month</a>
+						</td>
 					</tr>
-					<tr class="info">
-						<td colspan=2><b>' . getUserUsername($report["from_uid"]) . '</b> has sent <b>' . $uselessCount . '</b> useless reports in the last month</td>
+					<tr>
+						<td colspan=2>
+							<a title="View reports" href="index.php?p=126&uu='.$report["from_uid"].'&month=1"><b>' . getUserUsername($report["from_uid"]) . '</b> has sent <b>' . $uselessCount . '</b> useless reports in the last month</a>
+						</td>
 					</tr>
 				</table>
 
@@ -2961,16 +3073,20 @@ WHERE users.$kind = ? LIMIT 1", [$u]);
 				<ul class="list-group">
 					<li class="list-group-item list-group-item-danger">Quick actions</li>
 					<li class="list-group-item mobile-flex">
-						<a class="btn btn-primary" href="index.php?p=103&id=' . $report["to_uid"] . '"><i class="fa fa-expand"></i> View reported user in RAP</a>
 						<div class="btn btn-warning" data-toggle="modal" data-target="#silenceUserModal" data-who="' . getUserUsername($report["to_uid"]) . '"><i class="fa fa-microphone-slash"></i> Silence reported user</div>
-						<div class="btn btn-warning" data-toggle="modal" data-target="#silenceUserModal" data-who="' . getUserUsername($report["from_uid"]) . '"><i class="fa fa-microphone-slash"></i> Silence source user</div>
 						';
 						$restrictedDisabled = isRestricted($report["to_uid"]) ? "disabled" : "";
 						echo '<a class="btn btn-danger ' . $restrictedDisabled . '" onclick="sure(\'submit.php?action=restrictUnrestrictUser&id=' . $report["to_uid"] . '&resend=1&csrf='.csrfToken().'\')"><i class="fa fa-times"></i> Restrict reported user</a>';
 					echo '</li>
 				</ul>
 
-				<i><b>*</b> Latest 10 public messages sent from reported user before getting reported, trimmed to 50 characters.</i>
+				<ul class="list-group">
+					<li class="list-group-item list-group-item-danger">In case of emergency</li>
+					<li class="list-group-item mobile-flex">
+						<div class="alert alert-danger" role="alert"><p align="center">This will silence whoever made the report, NOT the reported user!! Use the button above if you want to silence the reported user.</p></div>
+						<div class="btn btn-warning" data-toggle="modal" data-target="#silenceUserModal" data-who="' . getUserUsername($report["from_uid"]) . '"><i class="fa fa-microphone-slash"></i> Silence source user</div>
+					</li>
+				</ul>
 
 			</div>';
 
@@ -3063,7 +3179,7 @@ WHERE users.$kind = ? LIMIT 1", [$u]);
 			array_push($params, $_GET["sid"]);
 		}
 		$reports = $GLOBALS["db"]->fetchall(
-			"SELECT anticheat_reports.*, scores.time, scores.play_mode, scores.userid, users.username, scores.pp, scores.mods, anticheats.name, beatmaps.beatmap_id, beatmaps.song_name, beatmaps.beatmap_id
+			"SELECT anticheat_reports.*, scores.time, scores.play_mode, scores.userid, users.username, scores.pp, scores.mods, scores.is_relax, anticheats.name, beatmaps.beatmap_id, beatmaps.song_name, beatmaps.beatmap_id
 			FROM anticheat_reports
 			JOIN anticheats ON anticheat_reports.anticheat_id = anticheats.id
 			JOIN scores ON anticheat_reports.score_id = scores.id
@@ -3079,6 +3195,39 @@ WHERE users.$kind = ? LIMIT 1", [$u]);
 			echo ' for user ' . $username;
 		}
 		echo '</h2>';
+		echo '<p align="center" class="mobile-flex"><button type="button" class="btn btn-primary" data-toggle="modal" data-target="#analyzeModal">Analyze replay</button>';
+		// Modal
+		echo '<div class="modal fade" id="analyzeModal" tabindex="-1" role="dialog" aria-labelledby="analyzeModalLabel">
+		<div class="modal-dialog">
+		<div class="modal-content">
+		<div class="modal-header">
+		<button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+		<h4 class="modal-title" id="analyzeModalLabel">Analyze replay <span class="label label-info">Beta</span></h4>
+		</div>
+		<div class="modal-body">
+		<div class="container alert alert-warning" role="alert" style="width:100%;">
+			<p align="center">
+				<i class="fas fa-fw fa-info-circle mr-3 mt-1"></i>
+				Analyzing a replay will not automatically log it in case of cheat detection, you will have to do it manually.
+			</p>
+		</div>
+		<p>
+		<form id="quick-edit-user-form" action="index.php" method="GET">
+		<input name="p" value="141" hidden>
+		<div class="input-group">
+		<span class="input-group-addon" id="basic-addon1"><span class="glyphicon glyphicon-zoom-in" aria-hidden="true"></span></span>
+		<input type="text" name="id" class="form-control" placeholder="Score ID (1337) or Ripple replay link (https://ripple.moe/web/replay/1337)" aria-describedby="basic-addon1" required>
+		</div>
+		</form>
+		</p>
+		</div>
+		<div class="modal-footer">
+		<button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
+		<button type="submit" form="quick-edit-user-form" class="btn btn-primary">Analyze</button>
+		</div>
+		</div>
+		</div>
+		</div>';
 
 		if (!$reports) {
 			echo "<p>No " . ($from > 0 ? "other" : "")  . " reports.</p>";
@@ -3091,6 +3240,7 @@ WHERE users.$kind = ? LIMIT 1", [$u]);
 			echo '<th class="text-center">When</th>
 				<th class="text-center">Score ID</th>
 				<th class="text-center">Game mode</th>
+				<th class="text-center">Relax mode</th>
 				<th class="text-center">Beatmap</th>
 				<th class="text-center">PP</th>
 				<th class="text-center">Anticheat</th>
@@ -3103,12 +3253,19 @@ WHERE users.$kind = ? LIMIT 1", [$u]);
 			global $URL;
 			foreach ($reports as $report) {
 				$severityColor = $report["severity"] >= 0.75 ? 'danger' : ($report["severity"] <= 0.25 ? 'primary' : 'warning');
-				echo "<tr class='$severityColor'>
+				if ($report["false_positive"] == 0) {
+					$falsePositiveClass = '';
+				} else {
+					$falsePositiveClass = 'line-through';	
+					$severityColor = 'success';
+				}
+				echo "<tr class='$severityColor $falsePositiveClass'>
 					<td><p class='text-center'>$report[id]</p></td>";
 					if ($all) echo "<td><p class='text-center'><a href='index.php?u=" . $report["userid"] . "'>$report[username]</a></p></td>";
 					echo "<td><p class='text-center'>" . timeDifference(time(), $report["time"]) . "</p></td>
 					<td><p class='text-center'><a href='" . URL::Server() . "/web/replays/$report[score_id]'>$report[score_id]	<i class='fa fa-star'></i></a></p></td>
 					<td><p class='text-center'>" . getPlaymodeText($report["play_mode"], true) . "</p></td>
+					<td><p class='text-center'>" . ($report["is_relax"] ? "Relax" : "Classic") . "</p></td>
 					<td><p class='text-center'><a href='" . URL::Server() . "/b/$report[beatmap_id]'>$report[song_name] " . getScoreMods($report["mods"]) . "	<i class='fa fa-music'></i> </a></p></td>
 					<td><p class='text-center'>$report[pp] pp</p></td>
 					<td><p class='text-center'>$report[name]</p></td>
@@ -3150,7 +3307,7 @@ WHERE users.$kind = ? LIMIT 1", [$u]);
 			}
 
 			$report = $GLOBALS["db"]->fetch(
-				"SELECT anticheat_reports.*, scores.time, scores.play_mode, scores.userid, users.username, scores.pp, scores.mods, anticheats.name, beatmaps.beatmap_id, beatmaps.song_name, beatmaps.beatmap_id
+				"SELECT anticheat_reports.*, scores.time, scores.play_mode, scores.userid, users.username, scores.pp, scores.mods, scores.is_relax, anticheats.name, beatmaps.beatmap_id, beatmaps.song_name, beatmaps.beatmap_id
 				FROM anticheat_reports
 				JOIN anticheats ON anticheat_reports.anticheat_id = anticheats.id
 				JOIN scores ON anticheat_reports.score_id = scores.id
@@ -3174,7 +3331,17 @@ WHERE users.$kind = ? LIMIT 1", [$u]);
 
 			echo '<br>';
 
+			// Print Success if set
+			if (isset($_GET['s']) && !empty($_GET['s'])) {
+				self::SuccessMessageStaccah($_GET['s']);
+			}
+			// Print Exception if set
+			if (isset($_GET['e']) && !empty($_GET['e'])) {
+				self::ExceptionMessageStaccah($_GET['e']);
+			}
+
 			$severityColor = $report["severity"] >= 0.75 ? 'danger' : ($report["severity"] <= 0.25 ? 'primary' : 'warning');
+			$fpColor = $report["false_positive"] == 1 ? 'success' : '';
 			echo "
 				<table class='table table-striped table-hover table-75-center'><tbody>
 					<tr>
@@ -3198,6 +3365,10 @@ WHERE users.$kind = ? LIMIT 1", [$u]);
 						<td>" . getPlaymodeText($report["play_mode"], true) . "</td>
 					</tr>
 					<tr>
+						<td>Relax mode</td>
+						<td>" . ($report["is_relax"] ? "Relax" : "Classic") . "</td>
+					</tr>
+					<tr>
 						<td>PP</td>
 						<td>$report[pp] pp</td>
 					</tr>
@@ -3208,6 +3379,10 @@ WHERE users.$kind = ? LIMIT 1", [$u]);
 					<tr class='$severityColor'>
 						<td>Severity</td>
 						<td><span class='label label-$severityColor'>$report[severity]</span></td>
+					</tr>
+					<tr class='$fpColor'>
+						<td>False positive</td>
+						<td>" . ($report["false_positive"] == 1 ? "Yes" : "No") . "</td>
 					</tr>
 					<tr>
 						<td>Anticheat data</td>";
@@ -3221,7 +3396,15 @@ WHERE users.$kind = ? LIMIT 1", [$u]);
 					}
 					
 					echo "</tr>
+				</tbody>
 				</table>";
+
+			echo '<p align="center" class="mobile-flex">
+			<a href="submit.php?action=setFP&rid='.$report["id"].'&v='.($report['false_positive'] == 1 ? '0' : '1').'&csrf='.csrfToken().'"
+			type="button" class="btn btn-' . ($report["false_positive"] == 1 ? "danger" : "success") . '">
+			' . ($report["false_positive"] == 1 ? "Unflag" : "Flag") . ' as false positive
+			</a>
+			</p>';
 
 			echo '</div>';
 			echo '</div>';
@@ -3278,10 +3461,20 @@ WHERE users.$kind = ? LIMIT 1", [$u]);
 				<td>
 				<select name="gm" class="selectpicker" data-width="100%">
 					<option value="-1">All</option>
-					<option value="0">Standard</option>
-					<option value="1">Taiko</option>
-					<option value="2">Catch the beat</option>
-					<option value="3">Mania</option>
+					<option value="0">osu!standard</option>
+					<option value="1">osu!taiko</option>
+					<option value="2">osu!catch</option>
+					<option value="3">osu!mania</option>
+				</select>
+				</td>
+				</tr>';
+				echo '<tr>
+				<td>Classic/Relax</td>
+				<td>
+				<select name="relax" class="selectpicker" data-width="100%">
+					<option value="-1">Both</option>
+					<option value="0">Classic</option>
+					<option value="1">Relax</option>
 				</select>
 				</td>
 				</tr>';
@@ -3313,12 +3506,16 @@ WHERE users.$kind = ? LIMIT 1", [$u]);
 				echo '<hr>';
 				$scoresCount = 0;
 				$scoresPreview = [];
-				foreach (["scores_removed.id, song_name, play_mode, pp", "COUNT(*) AS c"] as $i => $v) {				
+				foreach (["scores_removed.id, song_name, is_relax, play_mode, pp", "COUNT(*) AS c"] as $i => $v) {				
 					$q = "SELECT $v FROM scores_removed JOIN beatmaps USING(beatmap_md5) WHERE userid = ?";
 					$qp = [$_GET["id"]];
 					if ($_POST["gm"] > -1 && $_POST["gm"] <= 3) {
 						$q .= " AND play_mode = ?";
 						array_push($qp, $_POST["gm"]);
+					}
+					if ($_POST["relax"] == 0 || $_POST["relax"] == 1) {
+						$q .= " AND is_relax = ?";
+						array_push($qp, $_POST["relax"]);
 					}
 					if (isset($_POST["startdate"]) && !empty($_POST["startdate"])) {
 						$h = isset($_POST["starttime"]) && !empty($_POST["starttime"]) ? $_POST["starttime"] : "00:00";
@@ -3368,6 +3565,7 @@ WHERE users.$kind = ? LIMIT 1", [$u]);
 					<input name="csrf" type="hidden" value="'.csrfToken().'">
 					<input name="action" value="restoreScores" hidden>
 					<input name="gm" value="' . $_POST["gm"] . '" hidden>
+					<input name="relax" value="' . (isset($_POST["relax"]) ? $_POST["relax"] : '-1') . '" hidden>
 					<input name="userid" value="' . $_GET["id"] . '" hidden>';
 					if (isset($startts)) {
 						echo '<input name="starrts" value="' . $startts . '" hidden>';
@@ -3376,7 +3574,7 @@ WHERE users.$kind = ? LIMIT 1", [$u]);
 						echo '<input name="endts" value="' . $endts . '" hidden>';
 					}
 					echo '</form>';
-					echo '<div class="text-center"><button type="submit" form="restore-scores" class="btn btn-danger">Restore scores</button></div>';
+					echo '<div class="text-center"><button type="submit" form="restore-scores" class="btn btn-danger">Restore scores (might take a while)</button></div>';
 				}
 			}
 			echo '</div>';
@@ -3483,7 +3681,7 @@ WHERE users.$kind = ? LIMIT 1", [$u]);
 					$hax = true;
 				}
 				echo "<tr class='" . ($userFilter && $row["userid"] != $_GET["uid"] ? "danger bold" : "") . "'>
-				<td>$row[ip] <a class='getcountry' data-ip='$row[ip]'>(?)</a></td>
+				<td>$row[ip] <a class='getcountry' data-ip='$row[ip]'><i class='fa fa-globe-americas'></i></a></td>
 				<td><a href='index.php?p=103&id=$row[userid]' target='_blank'>$row[username]</a> <i>($row[userid])</i></td>
 				<td><span class='label label-$groupColor'>$groupText</span></td>
 				<td>$row[occurencies]</td>
@@ -3589,10 +3787,10 @@ WHERE users.$kind = ? LIMIT 1", [$u]);
 				<td>
 				<select name="gamemode" class="selectpicker bs-select-hidden" data-width="100%">
 					<option value="-1" selected="">All</option>
-					<option value="0">Standard</option>
-					<option value="1">Taiko</option>
-					<option value="2">Catch the beat</option>
-					<option value="3">Mania</option>
+					<option value="0">osu!standard</option>
+					<option value="1">osu!taiko</option>
+					<option value="2">osu!catch</option>
+					<option value="3">osu!mania</option>
 				</select>
 				</td>
 				</tr>';
@@ -3665,7 +3863,23 @@ WHERE users.$kind = ? LIMIT 1", [$u]);
 			$sqlParameters = array_merge($sqlParameters, $x["params"]);
 		}
 		$orderBy = $_GET["sort"] === "start" ? ("beatmaps.difficulty_" . getPlaymodeText($gm)) : "pp";
-		$results = $GLOBALS["db"]->fetchAll("SELECT scores.userid, scores.time, scores.id, scores.mods, users.username, scores.play_mode, beatmaps.beatmap_id, beatmaps.song_name, scores.pp, anticheat_reports.id AS anticheat_report_id, anticheat_reports.severity " . ($orderBy !== "pp" ? ", beatmaps.$orderBy" : ""). " FROM scores JOIN users ON scores.userid = users.id JOIN beatmaps USING(beatmap_md5) LEFT JOIN anticheat_reports ON scores.id = anticheat_reports.score_id WHERE completed = 3 AND users.privileges & 3 >= 3 AND $sqlClauses ORDER BY $orderBy DESC LIMIT $limit", $sqlParameters);
+		$results = $GLOBALS["db"]->fetchAll("SELECT
+		scores.userid, scores.time, scores.id, scores.mods, users.username,
+		scores.play_mode, beatmaps.beatmap_id, beatmaps.song_name, scores.pp,
+		anticheat_reports.id AS anticheat_report_id,
+		anticheat_reports.severity " . ($orderBy !== "pp" ? ", beatmaps.$orderBy" : ""). " 
+		FROM scores JOIN users ON scores.userid = users.id
+		JOIN beatmaps USING(beatmap_md5)
+
+		LEFT JOIN anticheat_reports
+		ON scores.id = anticheat_reports.score_id
+		AND anticheat_reports.false_positive = 0
+
+		WHERE completed = 3
+		AND users.privileges & 3 >= 3
+		AND $sqlClauses
+		ORDER BY $orderBy DESC
+		LIMIT $limit", $sqlParameters);
 
 		echo '<p align="center"><h2><i class="fa fa-fighter-jet"></i>	Top Scores (max ' . $limit . ' results)</h2></p>';
 
@@ -3713,6 +3927,124 @@ WHERE users.$kind = ? LIMIT 1", [$u]);
 
 		echo '</div>';
 		echo '</div>';
+	}
+	public static function AdminS3ReplaysBuckets() {
+		// Get data
+		$buckets = $GLOBALS['db']->fetchAll('SELECT * FROM s3_replay_buckets ORDER BY id ASC');
+		// Print sidebar and template stuff
+		echo '<div id="wrapper">';
+		printAdminSidebar();
+		echo '<div id="page-content-wrapper">';
+		// Maintenance check
+		self::MaintenanceStuff();
+		// Print Success if set
+		if (isset($_GET['s']) && !empty($_GET['s'])) {
+			self::SuccessMessageStaccah($_GET['s']);
+		}
+		// Print Exception if set
+		if (isset($_GET['e']) && !empty($_GET['e'])) {
+			self::ExceptionMessageStaccah($_GET['e']);
+		}
+		// Header
+		echo '<span class="centered"><h2><i class="fa fa-boxes"></i>	S3 Replay Buckets</h2></span>';
+		echo '<div class="container alert alert-warning" role="alert"><p align="center">The maximum recommended size for a SCW object storage bucket is about 500000 files according to their FAQ. Huge buckets work, but after about 5 million files uploads don\'t work anymore for some reason. Please ask Nyo to create a new bucket from SCW\'s control panel if the current write buckets becomes too big.</div>';
+		// Main page content here
+		echo '<div align="center">';
+		echo '<table class="table table-striped table-hover table-75-center">
+		<thead>
+		<tr><th class="text-center"><i class="fa fa-box"></i>	ID</th><th class="text-center">Name</th><th class="text-center">Size</th><th class="text-center">Max score id</th><th class="text-center">Action</th></tr>
+		</thead>
+		<tbody>';
+		foreach ($buckets as $bucket) {
+			echo "<tr class='" . ($bucket["max_score_id"] === null ? "success" : "") . "'>
+					<td style='text-align: center;'>$bucket[id]</td>
+					<td style='text-align: center;'>$bucket[name]</td>
+					<td style='text-align: center;'>" . number_format($bucket["size"]) . "</td>
+					<td style='text-align: center;'>" . ($bucket["max_score_id"] !== null ? $bucket["max_score_id"] : "<i class='fa fa-fill-drip'></i>" ). "</td>
+					<td style='text-align: center;'>
+						<div class='btn-group-justified'>
+							<a disabled href='#' title='Set as write bucket' class='btn btn-xs btn-success'><i class='fa fa-fill-drip'></i></a>
+						</div>
+					</td>
+				</tr>";
+		}
+		echo '</tbody>
+		</table>';
+
+		echo '<a href="#" type="button" class="btn btn-primary" disabled>Add bucket</a>';
+
+		echo '</div>';
+		// Template end
+		echo '</div>';
+	}
+
+
+	public static function AdminFindUsersWithBadge() {
+		try {
+			if (!isset($_GET["id"])) {
+				throw new Exception("Invalid badge");
+			}
+
+			// Get data
+			$data = $GLOBALS["db"]->fetchAll("SELECT users.id AS uid, username FROM users JOIN user_badges ON users.id = user_badges.user WHERE user_badges.badge = ?", [$_GET["id"]]);
+			if (!$data) {
+				throw new Exception("No rows returned.");
+			}
+			echo '<div id="wrapper">';
+			printAdminSidebar();
+			echo '<div id="page-content-wrapper">';
+			self::MaintenanceStuff();
+			echo '<span class="centered"><h2><i class="fa fa-search"></i>	Users with badge #'.htmlspecialchars($_GET["id"]).'</h2></span>';
+			echo '<div align="center">';
+			echo '<table class="table table-striped table-hover table-75-center">
+			<thead>
+			<tr><th class="text-left"><i class="fa fa-layer-group"></i>	ID</th><th class="text-center">Username</th></tr>
+			</thead>
+			<tbody>';
+			foreach ($data as $row) {
+				echo "<tr>
+						<td style='text-align: center;'>$row[uid]</td>
+						<td style='text-align: center;'><a href='index.php?u=$row[uid]'>$row[username]</a></td>
+					</tr>";
+			}
+			echo '</tbody>
+			</table>';
+
+			echo '</div>';
+			echo '</div>';
+		} catch(Exception $e) {
+			redirect("index.php?p=108?e=".$e->getMessage());
+		}
+	}
+
+	public static function AdminAnalyzeGRPC() {
+		try {
+			// Check if id is set
+			/*if (!isset($_GET['bsid']) || empty($_GET['bsid'])) {
+				throw new Exception('Invalid beatmap set id');
+			}*/
+			echo '<div id="wrapper">';
+			printAdminSidebar();
+			echo '<div id="page-content-wrapper">';
+			// Maintenance check
+			self::MaintenanceStuff();
+			echo '<p align="center"><h2><i class="fa fa-fire"></i>	Analyze score</h2></p>';
+
+			echo '<br><br>';
+
+			echo '<div id="main-content">
+				<p><i class="fa fa-circle-notch fa-spin fa-3x fa-fw"></i></p>
+				<p><img src="/images/trenta.png"></p>
+				<h3>Aspettiam sti trenta second...</h3>
+				<h5>This might take a while</h5>
+			</div>';
+			echo '</div>';
+			echo '</div>';
+		}
+		catch(Exception $e) {
+			// Redirect to exception page
+			redirect('index.php?p=132&e='.$e->getMessage());
+		}
 	}
 }
 

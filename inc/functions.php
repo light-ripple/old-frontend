@@ -49,6 +49,14 @@ $pages = [
 ];
 // Set timezone to UTC
 date_default_timezone_set('Europe/Rome');
+
+// Sentry
+if (!empty($sentryDSN)) {
+	$GLOBALS["sentry"] = Sentry\init(["dsn" => $sentryDSN]);
+} else {
+	$GLOBALS["sentry"] = null;
+}
+
 // Connect to MySQL Database
 $GLOBALS['db'] = new DBPDO();
 // Birthday
@@ -59,7 +67,8 @@ $isBday = date("dm") == "1208";
  ****************************************/
 function redisConnect() {
 	if (!isset($_GLOBALS["redis"])) {
-		$GLOBALS["redis"] = new Predis\Client();
+		global $redisConfig;
+		$GLOBALS["redis"] = new Predis\Client($redisConfig);
 	}
 }
 /*
@@ -171,6 +180,10 @@ function setTitle($p) {
 			136 => 'Search users by IP - Results',
 			137 => 'Top Scores',
 			138 => 'Top Scores Results',
+			139 => 'S3 Replays Buckets',
+			140 => 'Find users with badge',
+			141 => 'Analyze score',
+			142 => 'View osu! version logs',
 		];
 		if (isset($namesRipple[$p])) {
 			return __maketitle('Ripple', $namesRipple[$p]);
@@ -240,7 +253,7 @@ function printPage($p) {
 				// Admin panel - Users
 
 			case 102:
-				sessionCheckAdmin(Privileges::AdminManageUsers);
+				sessionCheckAdmin(Privileges::AdminSilenceUsers);
 				P::AdminUsers();
 			break;
 				// Admin panel - Edit user
@@ -419,6 +432,37 @@ function printPage($p) {
 				P::AdminTopScoresResults();
 			break;
 
+			// Admin panel - S3 replays buckets
+			case 139:
+				sessionCheckAdmin(Privileges::AdminCaker);
+				P::AdminS3ReplaysBuckets();
+			break;
+
+			// Admin panel - Find users with badge
+			case 140:
+				sessionCheckAdmin(Privileges::AdminManageBadges);
+				P::AdminFindUsersWithBadge();
+			break;
+
+			// Admin panel - Anticheat analyze GRPC
+			case 141:
+				sessionCheckAdmin(Privileges::AdminManageUsers);
+				P::AdminAnalyzeGRPC();
+			break;
+
+			case 142:
+				sessionCheckAdmin(Privileges::AdminCaker);
+				Fringuellina::Print142();
+			break;
+			case 143:
+				sessionCheckAdmin(Privileges::AdminCaker);
+				Fringuellina::Print143();
+			break;
+			case 144:
+				sessionCheckAdmin(Privileges::AdminCaker);
+				Fringuellina::Print144();
+			break;
+
 			// 404 page
 			default:
 				define('NotFound', '<br><h1>404</h1><p>Page not found. Meh.</p>');
@@ -475,14 +519,14 @@ function printNavbar() {
 							</button>';
 						}
 						global $isBday;
-						echo $isBday ? '<a class="navbar-brand" href="index.php"><i class="fa fa-birthday-cake"></i><img src="images/logos/text.png" style="display: inline; padding-left: 10px;"></a>' : '<a class="navbar-brand" href="index.php"><img src="images/logos/text.png"></a>';
+						echo $isBday ? '<a class="navbar-brand" href="index.php"><i class="fa fa-birthday-cake"></i><img src="images/logos/text.svg" style="display: inline; padding-left: 10px;"></a>' : '<a class="navbar-brand" href="index.php"><img src="images/logos/text.svg"></a>';
 					echo '</div>
 					<div class="navbar-collapse collapse">';
 	// Left elements
 	// Not logged left elements
 	echo '<ul class="nav navbar-nav navbar-left">';
 	if (!checkLoggedIn()) {
-		echo '<li><a href="index.php?p=2"><i class="fa fa-sign-in"></i>	Login</a></li>';
+		echo '<li><a href="index.php?p=2"><i class="fa fa-sign-in-alt"></i>	Login</a></li>';
 	}
 	// Logged in left elements
 	if (checkLoggedIn()) {
@@ -501,7 +545,7 @@ function printNavbar() {
 					<a data-toggle="dropdown"><img src="'.URL::Avatar().'/'.getUserID($_SESSION['username']).'" height="22" width="22" />	<b>'.$_SESSION['username'].'</b><span class="caret"></span></a>
 					<ul class="dropdown-menu">
 						<li class="dropdown-submenu"><a href="index.php?u='.getUserID($_SESSION['username']).'"><i class="fa fa-user"></i> My profile</a></li>
-						<li class="dropdown-submenu"><a href="submit.php?action=logout&csrf='.csrfToken().'"><i class="fa fa-sign-out"></i>	Logout</a></li>
+						<li class="dropdown-submenu"><a href="submit.php?action=logout&csrf='.csrfToken().'"><i class="fa fa-sign-out-alt"></i>	Logout</a></li>
 					</ul>
 				</li>';
 	}
@@ -518,14 +562,22 @@ function printAdminSidebar() {
 						<li class="sidebar-brand">
 							<a href="#"><b>R</b>ipple <b>A</b>dmin <b>P</b>anel</a>
 						</li>
-						<li><a href="index.php?p=100"><i class="fa fa-tachometer"></i>	Dashboard</a></li>';
+						<li><a href="index.php?p=100"><i class="fa fa-tachometer-alt"></i>	Dashboard</a></li>';
 
-						if (hasPrivilege(Privileges::AdminManageSettings))
+						if (hasPrivilege(Privileges::AdminManageSettings)) {
 							echo '<li><a href="index.php?p=101"><i class="fa fa-cog"></i>	System settings</a></li>
 							<li><a href="index.php?p=111"><i class="fa fa-server"></i>	Bancho settings</a></li>';
+						}
+
+						if (hasPrivilege(Privileges::AdminCaker)) {
+							echo '<li><a href="index.php?p=139"><i class="fa fa-boxes"></i>	S3 Replays Buckets</a></li>';
+						}
+
+						if (hasPrivilege(Privileges::AdminSilenceUsers)) {
+							echo '<li><a href="index.php?p=102"><i class="fa fa-user"></i>	Users</a></li>';
+						}
 
 						if (hasPrivilege(Privileges::AdminManageUsers)) {
-							echo '<li><a href="index.php?p=102"><i class="fa fa-user"></i>	Users</a></li>';
 							echo '<li><a href="index.php?p=132"><i class="fa fa-fire"></i>	Anticheat reports</a></li>';
 						}
 
@@ -543,22 +595,23 @@ function printAdminSidebar() {
 							echo '<li><a href="index.php?p=126"><i class="fa fa-flag"></i>	Reports</a></li>';
 
 						if (hasPrivilege(Privileges::AdminManagePrivileges))
-							echo '<li><a href="index.php?p=118"><i class="fa fa-group"></i>	Privilege Groups</a></li>';
+							echo '<li><a href="index.php?p=118"><i class="fa fa-layer-group"></i>	Privilege Groups</a></li>';
 
 						if (hasPrivilege(Privileges::AdminManageBadges))
 							echo '<li><a href="index.php?p=108"><i class="fa fa-certificate"></i>	Badges</a></li>';
 
 						if (hasPrivilege(Privileges::AdminManageBeatmaps)) {
 							echo '<li><a href="index.php?p=117"><i class="fa fa-music"></i>	Rank requests</a></li>';
-							echo '<li><a href="index.php?p=125"><i class="fa fa-level-up"></i>	Rank beatmap manually</a></li>';
+							echo '<li><a href="index.php?p=125"><i class="fa fa-level-up-alt"></i>	Rank beatmap manually</a></li>';
 						}
 
 						if (hasPrivilege(Privileges::AdminViewTopScores))
 							echo '<li><a href="index.php?p=137"><i class="fa fa-fighter-jet"></i>	Top scores</a></li>';
 
 						if (hasPrivilege(Privileges::AdminViewRAPLogs))
-							echo '<li class="animated infinite pulse"><a href="index.php?p=116"><i class="fa fa-calendar"></i>	Admin log&nbsp;&nbsp;&nbsp;<div class="label label-primary">Free botnets</div></a></li>';
-						echo "</ul>
+							echo '<li><a href="index.php?p=116"><i class="fa fa-calendar"></i>	Admin log&nbsp;&nbsp;&nbsp;<div class="label label-primary">Free botnets</div></a></li>';
+						echo "<li style='height: 50px;'></li></ul>
+						
 				</div>";
 }
 /*
@@ -913,10 +966,10 @@ function getUserUsername($uid) {
 function getPlaymodeText($playModeInt, $readable = false) {
 	switch ($playModeInt) {
 		case 1:
-			return $readable ? 'Taiko' : 'taiko';
+			return $readable ? 'osu!taiko' : 'taiko';
 		break;
 		case 2:
-			return $readable ? 'Catch the Beat' : 'ctb';
+			return $readable ? 'osu!catch' : 'ctb';
 		break;
 		case 3:
 			return $readable ? 'osu!mania' : 'mania';
@@ -1612,12 +1665,35 @@ function bloodcatDirectString($arr, $np = false) {
 }
 
 function printBubble($userID, $username, $message, $time, $through) {
-	echo '
+	$lthrough = strtolower($through);
+	switch ($lthrough) {
+		case 'rap': $icon = 'eye'; break;
+		case 'delta': $icon = 'gamepad'; break;
+		case strpos($lthrough, 'fokabot') !== false: $icon = 'robot'; break;
+		case strpos($lthrough, 'matsuko') !== false: $icon = 'life-ring'; break;
+		case strpos($lthrough, 'api') !== false: $icon = 'terminal'; break;
+		default: $icon = 'question-circle'; break;
+	}
+	echo "
+	<div class='logline'>
+		<img class='circle' src='".URL::Avatar().'/'.$userID."'>
+		<div>
+			<b>".htmlspecialchars($username)."</b> " . htmlspecialchars($message) . "
+		</div>
+		<div>
+			<div>" . timeDifference($time, time()) ."</div>
+			<div>
+				through <i>" . htmlspecialchars($through) . " <i class='fa fa-$icon'></i></i>
+			</div>
+		</div>
+	</div>
+	";
+	/*echo '
 	<img class="circle" src="' . URL::Avatar() . '/' . $userID . '">
 	<div class="bubble">
 		<b>' . $username . '</b> ' . $message . '<br>
 		<span style="font-size: 80%">' . timeDifference($time, time()) .' through <i>' . $through . '</i></span>
-	</div>';
+	</div>';*/
 }
 
 function rapLog($message, $userID = -1, $through = "RAP") {
@@ -1707,8 +1783,7 @@ function hasPrivilege($privilege, $userID = -1) {
 			return false;
 		else
 			$userID = $_SESSION["userid"];
-	$result = getUserPrivileges($userID) & $privilege;
-	return $result > 0 ? true : false;
+	return (getUserPrivileges($userID) & $privilege) > 0;
 }
 
 function isRestricted($userID = -1) {
@@ -1840,9 +1915,11 @@ function removeFromLeaderboard($userID) {
 	redisConnect();
 	$country = strtolower($GLOBALS["db"]->fetch("SELECT country FROM users_stats WHERE id = ? LIMIT 1", [$userID])["country"]);
 	foreach (["std", "taiko", "ctb", "mania"] as $key => $value) {
-		$GLOBALS["redis"]->zrem("ripple:leaderboard:".$value, $userID);
-		if (strlen($country) > 0 && $country != "xx") {
-			$GLOBALS["redis"]->zrem("ripple:leaderboard:".$value.":".$country, $userID);
+		foreach (["", ":relax"] as $kkey => $suffix) {
+			$GLOBALS["redis"]->zrem("ripple:leaderboard:".$value.$suffix, $userID);
+			if (strlen($country) > 0 && $country != "xx") {
+				$GLOBALS["redis"]->zrem("ripple:leaderboard:".$value.":".$country.$suffix, $userID);
+			}
 		}
 	}
 }
@@ -1951,17 +2028,22 @@ function getTimestampFromStr($str, $fmt="Y-m-d H:i") {
 function jsonArrayToHtmlTable($arr) {
 	$str = "<table class='anticheattable'><tbody>";
 	foreach ($arr as $key => $val) {
-			$str .= "<tr>";
-			$str .= "<td>$key</td>";
-			$str .= "<td>";
-			if (is_array($val)) {
-					if (!empty($val)) {
-							$str .= jsonArrayToHtmlTable($val);
-					}
-			} else {
-					$str .= "<strong>".(is_bool($val) ? ($val ? "true" : "false") : $val)."</strong>";
+		if (is_bool($val)) {
+			$laclasse = $val ? 'bad' : 'good';
+		} else {
+			$laclasse = '';
+		}
+		$str .= "<tr class='$laclasse'>";
+		$str .= "<td>$key</td>";
+		$str .= "<td>";
+		if (is_array($val)) {
+			if (!empty($val)) {
+				$str .= jsonArrayToHtmlTable($val);
 			}
-			$str .= "</td></tr>";
+		} else {
+			$str .= "<strong>".(is_bool($val) ? ($val ? "true" : "false") : $val)."</strong>";
+		}
+		$str .= "</td></tr>";
 	}
 	$str .= "</tbody></table>";
 
@@ -1995,4 +2077,118 @@ function updateMainMenuIconBancho() {
 function testMainMenuIconBancho($userID, $mainMenuIconID) {
 	redisConnect();
 	$GLOBALS["redis"]->publish("peppy:set_main_menu_icon", json_encode(["userID" => $userID, "mainMenuIconID" => $mainMenuIconID]));
+}
+
+function has2FA($userID) {
+	return $GLOBALS["db"]->fetch("SELECT userid FROM 2fa_totp WHERE userid = ? AND `enabled` = 1 LIMIT 1", [$userID]) !== false;
+}
+
+function getDiscordData($userID) {
+	return $GLOBALS["db"]->fetch("SELECT discordid, roleid FROM discord_roles WHERE userid = ? LIMIT 1", [$userID]);
+}
+
+function nukeExt($table, $q, $p) {
+	echo "Deleting data from " . $table . "\n";
+	$GLOBALS["db"]->execute($q, $p);
+}
+
+function nuke($table, $column, $userID, $limit = false) {
+	$q = "DELETE FROM " . $table . " WHERE " . $column . " = ?";
+	if ($limit) {
+		$q .= " LIMIT 1";
+	}
+	nukeExt($table, $q, [$userID]);
+}
+
+// Ugly code I wrote for an high school thing about 2 years ago
+function api_start() {
+	ob_start();
+	
+	global $APP_CONFIG;
+	if ($APP_CONFIG["development"] && $_SERVER["REQUEST_METHOD"] === "OPTIONS") {
+			// CORS shit
+			header("Access-Control-Allow-Origin: *");
+			header("Access-Control-Allow-Methods: POST, GET, DELETE, PUT, PATCH, OPTIONS");
+			header("Access-Control-Allow-Headers: token, Content-Type");
+			header("Access-Control-Max-Age: 1728000");
+			header("Content-Length: 0");
+			header("Content-Type: text/plain");
+			die();
+	}
+}
+
+function api_output($output, $clear=true, $encode=true) {
+	if ($clear)
+		ob_end_clean();
+	header('Content-Type: application/json');
+	print($encode ? json_encode($output, JSON_UNESCAPED_SLASHES) : $output);
+}
+
+function api_output_raw($output, $clear=true) {
+	api_output($output, $clear, false);
+}
+
+function api_error($e, $code=0) {
+	if ($code === 0) {
+		$code = $e->getCode();
+	}
+	http_response_code($code);
+	return [
+		"status" => $code,
+		"message" => $e->getMessage()
+	];
+}
+
+function api_succ($data = []) {
+	http_response_code(200);
+	return array_merge([
+		"status" => 200,
+		"message" => "ok",
+	], $data);
+}
+
+function isSilenced($userID) {
+	$r = $GLOBALS["db"]->fetch("SELECT silence_end AS t FROM users WHERE id = ? LIMIT 1", [$userID]);
+	return $r["t"] >= time();
+}
+
+function checkDiscordSecret() {
+	global $discordConfig;
+	if (@$_GET["k"] !== $discordConfig["donor_bot_secret"]) {
+		throw new Exception("Access denied", 403);
+	}
+}
+
+class DiscordAlreadyUnlinkedException extends Exception {}
+
+function unlinkDiscord($uid) {
+	global $discordConfig;
+	$u = $GLOBALS["db"]->fetch(
+        "SELECT discordid, roleid FROM discord_roles WHERE userid = ?",
+        [$uid],
+    );
+    if (!$u) {
+        throw new DiscordAlreadyUnlinkedException();
+	}
+	$bot = new \RestCord\DiscordClient(
+        ["token" => $discordConfig["bot_token"]]
+	);
+	try {
+		$bot->guild->removeGuildMemberRole([
+			"guild.id" => $discordConfig["guild_id"],
+			"user.id" => (int)$u["discordid"],
+			"role.id" => $discordConfig["donor_role_id"],
+		]);
+	} catch (Exception $e) {}
+	if ((int)$u["roleid"] > 0) {
+		try {
+			$bot->guild->deleteGuildRole([
+				"guild.id" => $discordConfig["guild_id"],
+				"role.id" => (int)$u["roleid"],
+			]);
+		} catch (Exception $e) {}
+	}
+	$GLOBALS["db"]->execute(
+		"DELETE FROM discord_roles WHERE userid = ?", [$uid],
+	);
 }
